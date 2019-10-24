@@ -1,0 +1,182 @@
+# No exemplo de hoje irei criar um modelo para prever se devo ou não conceder crédito para o meu cliente.
+# Irei utilizar os pacotes: CARET , ROCR e E1071
+# Instalando os pacotes
+
+install.packages('caret')
+install.packages('ROCR')
+install.packages('e1071')
+library('caret')
+library('ROCR')
+library('e1071')
+
+# Vou utilizar a base de dados "Credit Data Set", deixarei ela disponível 
+# para consulta na seção de bases do blog.
+
+# abaixo verifico o caminho da minha área de trabalho. Posso alterar com setwd() caso eu queira
+getwd()
+
+credito_dataset <- read.csv ("credit_dataset_final.csv", header = TRUE, sep = "," )
+
+#Os comandos abaixo me ajudam a analisar de forma rápida a estrutura dos meus dados
+
+head (credito_dataset)
+summary (credito_dataset) # Resumo estatístico
+str (credito_dataset)     # Tipo das variáveis
+View (credito_dataset)    # Visualização em formato de Coluna
+
+
+# Criação de uma função para transformar variáveis e fatores
+to.factors <- function(df, variables){
+  for (variable in variables){
+    df[[variable]] <- as.factor(df[[variable]])
+  }
+  return(df)
+}
+
+# Criação da Função de Normalização
+scale.features <- function(df, variables){
+  for (variable in variables){
+    df[[variable]] <- scale(df[[variable]], center = T, scale = T)
+  }
+  return(df)
+}
+
+
+
+# Normalização das variáveis para que fiquem na mesma escala.
+numeric.vars <- c("credit.duration.months", "age", "credit.amount")  ### Cria um vetor chamado numeric.vars e que tem o nome de 3 variáveis numéricas.
+credito_dataset_scaled <- scale.features(credito_dataset, numeric.vars) ### Cria um data.frame que recebe os dados do dataset original, porém, tem a os campos númericos passados pela função de normalização
+
+
+# Transformação de variáveis categóricas em fatores
+categorical.vars <- c('credit.rating', 'account.balance', 'previous.credit.payment.status',
+                      'credit.purpose', 'savings', 'employment.duration', 'installment.rate',
+                      'marital.status', 'guarantor', 'residence.duration', 'current.assets',
+                      'other.credits', 'apartment.type', 'bank.credits', 'occupation', 
+                      'dependents', 'telephone', 'foreign.worker')
+
+
+# Aplicando a conversão de Fatores no dataset
+credito_dataset_final <- to.factors(df = credito_dataset_scaled, variables = categorical.vars) # É criado um novo dataset e os variáveis categóricas são transformadas em fatores através da função previamente criada
+head(credito_dataset_final)
+summary(credito_dataset_final)
+View(credito_dataset_final)
+
+# Preparando os dados de treino e de teste
+indexes <- sample(1:nrow(credito_dataset_final), size = 0.6 * nrow(credito_dataset_final)) # Ver video
+train.data <- credito_dataset_final[indexes,] # o data.frame de treino recebe somente os dados previamente selecionados (60% dos dados do data.frame completo)
+test.data <- credito_dataset_final[-indexes,] # o data.frame de teste recebe o restante dos dados
+class(train.data)
+class(test.data)
+
+# Separando os atributos e as classes
+test.feature.vars <- test.data[,-1] # coloca em um novo data.frame todas as colunas do data.frame de teste, exceto a coluna preditora
+test.class.var <- test.data[,1] # coloca em um novo data.frame somente a coluna preditora.
+class(test.feature.vars)
+
+# Construindo o modelo de regressão logística
+formula.init <- "credit.rating ~ ."  # Colocamos dentro da formula.init a variável target "credit.rating" e todas as outras variáveis, simbolizadas pelo símbolo "."
+formula.init <- as.formula(formula.init) # transformamos a formula.init em uma Fórmula.
+modelo_v1 <- glm(formula = formula.init, data = train.data, family = "binomial") #Utilizamos a função glm, que é o algoritmo de regressão logística
+
+# Visualizando os detalhes do modelo
+summary(modelo_v1) # mostra o sumário do modelo criado.
+
+# Testando o modelo
+previsoes <- predict(modelo_v1, test.data, type = "response") # Analisando através da função 'predict' a resposta do modelo aos dados de teste
+previsoes <- round(previsoes)
+View(previsoes)
+
+# Analisando a Confusion Matrix
+confusionMatrix(table(data = previsoes, reference = test.class.var), positive = '1')
+
+# Até agora o modelo foi criado considerando todas as variáveis, no passo abaixo utilizaremos uma
+# seleção prévia das variáveis
+formula <- "credit.rating ~ ."   # colocando em formula a variável target e todas as outras variáveis.
+formula <- as.formula(formula)   # transformando a formula em fórmula
+control <- trainControl(method = "repeatedcv", number = 10, repeats = 2) # Ver vídeo
+model <- train(formula, data = train.data, method = "glm", trControl = control) # Ver vídeo
+importance <- varImp(model, scale = FALSE) # Ver vídeo
+
+# Plotando o resultado
+plot(importance)
+
+# Construindo um modelo novo, apenas com as variáveis selecionadas
+formula.new <- "credit.rating ~ account.balance + credit.purpose + previous.credit.payment.status + savings + credit.duration.months"
+formula.new <- as.formula(formula.new)
+modelo_v2 <- glm(formula = formula.new, data = train.data, family = "binomial")
+
+# Visualizando o novo modelo
+summary(modelo_v2)
+
+# Prevendo e Avaliando o modelo 
+previsoes_new <- predict(modelo_v2, test.data, type = "response") 
+previsoes_new <- round(previsoes_new)
+
+# Confusion Matrix
+confusionMatrix(table(data = previsoes_new, reference = test.class.var), positive = '1')
+
+
+# Avaliando a performance do modelo
+
+# Plot do modelo com melhor acurÃ¡cia
+modelo_final <- modelo_v2
+previsoes <- predict(modelo_final, test.feature.vars, type = "response")
+previsoes_finais <- prediction(previsoes, test.class.var)
+
+# ROC - Essa é outra opção para visualizarmos a performance do modelo
+plot.roc.curve <- function(predictions, title.text){
+  perf <- performance(predictions, "tpr", "fpr")
+  plot(perf,col = "black",lty = 1, lwd = 2,
+       main = title.text, cex.main = 0.6, cex.lab = 0.8,xaxs = "i", yaxs = "i")
+  abline(0,1, col = "red")
+  auc <- performance(predictions,"auc")
+  auc <- unlist(slot(auc, "y.values"))
+  auc <- round(auc,2)
+  legend(0.4,0.4,legend = c(paste0("AUC: ",auc)), cex = 0.6, bty = "n", box.col = "white")
+  
+}
+
+# Plot
+par(mfrow = c(1, 2))
+plot.roc.curve(previsoes_finais, title.text = "Curva ROC")
+
+# Fazendo previsões utilizando novos dados
+
+# Novos dados
+account.balance <- c(1, 4, 3)
+credit.purpose <- c(4, 2, 3)
+previous.credit.payment.status <- c(3, 3, 2)
+savings <- c(2, 3, 2)
+credit.duration.months <- c(15, 12, 8)
+
+# Cria um dataframe
+novo_dataset <- data.frame(account.balance, 
+                           credit.purpose, 
+                           previous.credit.payment.status, 
+                           savings, 
+                           credit.duration.months)
+
+View(novo_dataset)
+
+# Separa variáveis explanatórias numeréricas e categóricas
+new.numeric.vars <- c("credit.duration.months")
+new.categorical.vars <- c('account.balance', 'previous.credit.payment.status', 
+                          'credit.purpose', 'savings')
+
+# Aplica as transformações
+novo_dataset_final <- to.factors(df = novo_dataset, variables = new.categorical.vars)
+str(novo_dataset_final)
+
+novo_dataset_final <- scale.features(novo_dataset_final, new.numeric.vars)
+str(novo_dataset_final)
+
+View(novo_dataset_final)
+
+# Previsões
+?predict
+previsao_novo_cliente <- predict(modelo_final, newdata = novo_dataset_final, type = "response")
+
+
+
+
